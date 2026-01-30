@@ -37,6 +37,7 @@
 #ifndef OMPL_GEOMETRIC_PLANNERS_INFORMEDTREES_BITSTAR_
 #define OMPL_GEOMETRIC_PLANNERS_INFORMEDTREES_BITSTAR_
 
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -148,11 +149,15 @@ namespace ompl
             /** \brief A utility functor for ImplicitGraph and SearchQueue. */
             using NameFunc = std::function<std::string()>;
 
+            /** \brief A callback that returns a state sequence from start to goal. */
+            using ChompOptimizeFn =
+                std::function<std::vector<std::vector<double>>(const base::State *start, const base::State *goal)>;
+
             /** \brief Construct with a pointer to the space information and an optional name. */
             BITstar(const base::SpaceInformationPtr &spaceInfo, const std::string &name = "kBITstar");
 
             /** \brief Destruct using the default destructor. */
-            virtual ~BITstar() override = default;
+            ~BITstar() override;
 
             /** \brief Setup the algorithm. */
             void setup() override;
@@ -165,6 +170,14 @@ namespace ompl
 
             /** \brief Get results. */
             void getPlannerData(base::PlannerData &data) const override;
+
+            // ---
+            // Chomp state sequence.
+            // ---
+
+            /** \brief Set a callback to build a state sequence from a start and goal state. */
+            void setChompOptimizeFn(const ChompOptimizeFn &fn);
+            
 
             // ---
             // Debugging info.
@@ -464,6 +477,20 @@ namespace ompl
             /** \brief Retrieve the total number of edges processed from the queue as a planner-progress property. (From
              * queuePtr_) */
             std::string edgesProcessedProgressProperty() const;
+            
+            /** \brief Add all edges from the chomp to the tree. Will add the state to the vertex queue if it's new
+             * to the tree or otherwise replace the parent. Updates solution information if the solution improves. */
+            void addChompEdgesToGraph();
+
+            /** \brief Call the callback and store vertices built from the state sequence. */
+            void ChompOptimize(const VertexPtr start, const VertexPtr goal, ompl::base::Cost &chomp_cost);
+
+
+            // /** \brief Get the vertices built from the chomp sequence. */
+            // const VertexPtrVector &getChompVertices() const;
+
+            // /** \brief Get the vertices as pairs built from the chomp sequence. */
+            // const VertexPtrPairVector &getChompVertexPairs() const;
 
             // ---
             // Member variables (Make all are configured in setup() and reset in reset()).
@@ -540,6 +567,12 @@ namespace ompl
             /** \brief The number of edge collision checks. Accessible via edgeCollisionCheckProgressProperty. */
             unsigned int numEdgeCollisionChecks_{0u};
 
+            /** \brief Clear the stored vertices. */
+            void clearChompVertices();
+
+            /** \brief Clear the stored vertex pairs. */
+            void clearChompVertexPairs();
+
             // ---
             // Parameters - Set defaults in construction/setup and do not reset in clear.
             // ---
@@ -555,6 +588,20 @@ namespace ompl
 
             /** \brief Whether to stop the planner as soon as the path changes. */
             bool stopOnSolutionChange_{false};
+
+            /** \brief A callback that returns a state sequence from start to goal. */
+            ChompOptimizeFn ChompOptimizeFn_;
+
+            /** \brief Stored vertices built from the chomp sequence. */
+            VertexPtrVector chomp_vertex_vector_;
+            
+            /** \brief Stored vertices as pairs built from the chomp sequence. */
+            VertexPtrPairVector chomp_vertex_pair_vector_;
+            
+            /** \brief Cost of the chomp_trajectory */
+            ompl::base::Cost chomp_cost;
+
+            size_t need_to_call_chomp_ = 0;
         };  // class BITstar
     }       // namespace geometric
 }  // namespace ompl

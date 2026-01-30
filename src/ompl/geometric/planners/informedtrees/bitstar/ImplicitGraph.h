@@ -259,6 +259,12 @@ namespace ompl
             /** \brief The number of state collision checks. */
             unsigned int numStateCollisionChecks() const;
 
+            /** \brief Get the current approximation id pointer for new vertices. */
+            std::shared_ptr<const unsigned int> getApproximationIdPtr() const
+            {
+                return approximationId_;
+            }
+
             // ---
             // General helper functions.
             // ---

@@ -165,6 +165,12 @@ namespace ompl
             */
         }
 
+        BITstar::~BITstar()
+        {
+            clearChompVertices();
+            clearChompVertexPairs();
+        }
+
         void BITstar::setup()
         {
             // Call the base class setup. Marks Planner::setup_ as true.
@@ -284,6 +290,10 @@ namespace ompl
             numEdgeCollisionChecks_ = 0u;
             numRewirings_ = 0u;
 
+            // Clear stored vertices and pairs.
+            clearChompVertices();
+            clearChompVertexPairs();
+
             // DO NOT reset the configuration parameters:
             // samplesPerBatch_
             // usePruning_
@@ -297,10 +307,119 @@ namespace ompl
             Planner::clear();
         }
 
+        void BITstar::setChompOptimizeFn(const ChompOptimizeFn &fn)
+        {
+            ChompOptimizeFn_ = fn;
+        }
+
+        void BITstar::ChompOptimize(const VertexPtr start, const VertexPtr goal, ompl::base::Cost &chomp_cost)
+        {   
+            clearChompVertices();
+            clearChompVertexPairs();
+
+            if (!ChompOptimizeFn_)
+            {
+                chomp_cost = costHelpPtr_->infiniteCost();   //TODO: start and goal vector
+                return;
+            }
+
+            std::vector<std::vector<double>> waypoints = ChompOptimizeFn_(start->state(), goal->state());
+
+            // TODO: add a check if start and goal match with the input
+
+            if (waypoints.size() <= 2)
+            {
+                chomp_cost = costHelpPtr_->infiniteCost();
+                return;
+            }
+
+            chomp_cost = costHelpPtr_->identityCost();
+
+            chomp_vertex_vector_.reserve(waypoints.size());
+            chomp_vertex_pair_vector_.reserve(waypoints.size()-1);
+
+            // Start vertex is copied from original ones
+            chomp_vertex_vector_.push_back(start);
+
+            for (size_t i = 1; i < waypoints.size() - 1; i++)
+            {
+                auto vertex = std::make_shared<Vertex>(Planner::si_, costHelpPtr_.get(), queuePtr_.get(), graphPtr_->getApproximationIdPtr(), false);
+                
+                Planner::si_->getStateSpace()->copyFromReals(vertex->state(), waypoints[i]);
+
+                chomp_vertex_vector_.push_back(std::move(vertex));
+            }
+            
+            // Goal vertex is copied from original ones
+            chomp_vertex_vector_.push_back(goal);
+
+            for(size_t i = 0; i < chomp_vertex_vector_.size()-1; i++)
+            {   
+                VertexPtrPair edge(chomp_vertex_vector_[i], chomp_vertex_vector_[i+1]);
+
+                chomp_vertex_pair_vector_.push_back(std::move(edge));
+
+                // c_hat(v,x)
+                ompl::base::Cost edge_cost = costHelpPtr_->edgeCostHeuristic(edge);   //Note this is heurestic cost
+                
+                chomp_cost = costHelpPtr_->combineCosts(chomp_cost, edge_cost);
+            }
+        }
+
+        void BITstar::addChompEdgesToGraph()
+        {   
+            for(size_t i = 0; i < chomp_vertex_pair_vector_.size(); i++)
+            {
+                ompl::base::Cost edge_cost = costHelpPtr_->edgeCostHeuristic(chomp_vertex_pair_vector_[i]);
+                
+                // If the child already has a parent, this is a rewiring.
+                if (chomp_vertex_pair_vector_[i].second->hasParent())
+                {
+                    // Replace the old parent.
+                    this->replaceParent(chomp_vertex_pair_vector_[i], edge_cost);
+                }  // If not, we add the vertex without replaceing a parent.
+                else
+                {
+                    // Add a parent to the child.
+                    chomp_vertex_pair_vector_[i].second->addParent(chomp_vertex_pair_vector_[i].first, edge_cost);
+                    
+                    // Add a child to the parent.
+                    chomp_vertex_pair_vector_[i].first->addChild(chomp_vertex_pair_vector_[i].second);
+                    
+                    // Add the vertex to the set of vertices.
+                    graphPtr_->registerAsVertex(chomp_vertex_pair_vector_[i].second);
+                }
+            }
+        }
+
+        // const BITstar::VertexPtrVector &BITstar::getChompVertices() const
+        // {
+        //     return chomp_vertex_vector_;
+        // }
+
+        void BITstar::clearChompVertices()
+        {
+            chomp_vertex_vector_.clear();
+        }
+
+        // const BITstar::VertexPtrPairVector &BITstar::getChompVertexPairs() const
+        // {
+        //     return chomp_vertex_pair_vector_;
+        // }
+
+        void BITstar::clearChompVertexPairs()
+        {
+            chomp_vertex_pair_vector_.clear();
+        }
+
         ompl::base::PlannerStatus BITstar::solve(const ompl::base::PlannerTerminationCondition &ptc)
         {
             // Check that Planner::setup_ is true, if not call this->setup()
+            auto start = std::chrono::high_resolution_clock::now();
             Planner::checkValidity();
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = end - start;    
+            std::cout << "***  Planner::checkValidity()  Time taken : " << elapsed.count() << " seconds\n"; 
 
             // Assert setup succeeded
             if (!Planner::setup_)
@@ -357,13 +476,17 @@ namespace ompl
                 - There is are start/goal states we've yet to consider (pis_.haveMoreStartStates() == true ||
               pis_.haveMoreGoalStates() == true)
             */
+            size_t total_time_chomp_was_needed_ = 0;
             while (!ptc && !stopLoop_ && !costHelpPtr_->isSatisfied(bestCost_) &&
                    (costHelpPtr_->isCostBetterThan(graphPtr_->minCost(), bestCost_) ||
                     Planner::pis_.haveMoreStartStates() || Planner::pis_.haveMoreGoalStates()))
             {
                 this->iterate();
+                std::cout << "number of times chomp was needed : " << need_to_call_chomp_ << std::endl;
+                total_time_chomp_was_needed_ += need_to_call_chomp_;
             }
-
+            
+            std::cout << "Total times chomp was needed : " << total_time_chomp_was_needed_ << std::endl << std::endl;
             // Announce
             if (hasExactSolution_)
             {
@@ -550,41 +673,88 @@ namespace ompl
                 else if (costHelpPtr_->isCostBetterThan(
                              costHelpPtr_->inflateCost(costHelpPtr_->currentHeuristicEdge(edge), truncationFactor_),
                              bestCost_))
-                {
+                {   
                     // What about improving the current graph?
                     // g_t(v) + c_hat(v,x)  < g_t(x)?
+                    // *************** BHAVIKA CHAWLA ***************
+                    // g_t(v) + σ(v,x)  < g_t(x)?
                     if (costHelpPtr_->isCostBetterThan(costHelpPtr_->currentHeuristicToTarget(edge),
                                                        edge.second->getCost()))
                     {
                         // Ok, so it *could* be a useful edge. Do the work of calculating its cost for real
 
                         // Get the true cost of the edge
-                        ompl::base::Cost trueEdgeCost = costHelpPtr_->trueEdgeCost(edge);
+                        // ompl::base::Cost trueEdgeCost = costHelpPtr_->trueEdgeCost(edge);
+                        
+                        // *************** BHAVIKA CHAWLA ***************
+                        // Optimize Edge using CHOMP  s((vm, xm))
+                        // σ(v,x) = CHOMP::optimal_path()
+
+                        need_to_call_chomp_ ++;
+
+                        ompl::base::Cost chomp_cost = costHelpPtr_->identityCost();
+
+                        this->ChompOptimize(edge.first, edge.second, chomp_cost);
+
+                        ompl::base::Cost edge_cost;
+                        bool is_chomp = false;
+                        if (costHelpPtr_->isFinite(chomp_cost))
+                        {
+                            edge_cost = chomp_cost;
+                            is_chomp = true;
+                        }
+                        else
+                        {
+                            edge_cost = costHelpPtr_->trueEdgeCost(edge);
+                        }
+                        
+                        // TODO: maybe! check if chomp cost is finitie and better than true edge cost?
 
                         // Can this actual edge ever improve our solution?
                         // g_hat(v) + c(v,x) + h_hat(x) < g_t(x_g)?
+                        // *************** BHAVIKA CHAWLA ***************
+                        // g_hat(v) + σ(v,x) + h_hat(x) < g_t(x_g)?
                         if (costHelpPtr_->isCostBetterThan(
-                                costHelpPtr_->combineCosts(costHelpPtr_->costToComeHeuristic(edge.first), trueEdgeCost,
+                                costHelpPtr_->combineCosts(costHelpPtr_->costToComeHeuristic(edge.first), edge_cost,
                                                            costHelpPtr_->costToGoHeuristic(edge.second)),
                                 bestCost_))
                         {
-                            // Does this edge have a collision?
-                            if (this->checkEdge(edge))
+                            // Does this edge have a collision? 
+                            bool is_collision_free = false;
+                            if(!is_chomp)
                             {
+                                is_collision_free = this->checkEdge(edge);
+                            }
+                            else
+                            {
+                                is_collision_free = true;
+                            }
+
+                            if (is_collision_free)
+                            {   
                                 // Remember that this edge has passed the collision checks.
                                 this->whitelistEdge(edge);
 
                                 // Does the current edge improve our graph?
                                 // g_t(v) + c(v,x) < g_t(x)?
+                                // *************** BHAVIKA CHAWLA ***************
+                                // g_t(v) + σ(v,x) < g_t(x)?
                                 if (costHelpPtr_->isCostBetterThan(
-                                        costHelpPtr_->combineCosts(edge.first->getCost(), trueEdgeCost),
+                                        costHelpPtr_->combineCosts(edge.first->getCost(), edge_cost),
                                         edge.second->getCost()))
-                                {
-                                    // YAAAAH. Add the edge! Allowing for the sample to be removed from free if it is
-                                    // not currently connected and otherwise propagate cost updates to descendants.
-                                    // addEdge will update the queue and handle the extra work that occurs if this edge
-                                    // improves the solution.
-                                    this->addEdge(edge, trueEdgeCost);
+                                {   
+                                    if(is_chomp)
+                                    {   
+                                        addChompEdgesToGraph();
+                                    }
+                                    else
+                                    {
+                                        // YAAAAH. Add the edge! Allowing for the sample to be removed from free if it is
+                                        // not currently connected and otherwise propagate cost updates to descendants.
+                                        // addEdge will update the queue and handle the extra work that occurs if this edge
+                                        // improves the solution.
+                                        this->addEdge(edge, edge_cost);
+                                    }
 
                                     // If the path to the goal has changed, we will need to update the cached info about
                                     // the solution cost or solution length:
