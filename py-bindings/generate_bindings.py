@@ -761,6 +761,11 @@ class ompl_geometric_generator_t(code_generator_t):
         self.add_function_wrapper(
             'bool(const ompl::geometric::PRM::Vertex&, const ompl::geometric::PRM::Vertex&)',
             'ConnectionFilter', 'Connection filter')
+        self.add_function_wrapper(
+            'std::vector<std::vector<double> >(const ompl::base::State*, const ompl::base::State*)',
+            'ChompOptimizeFn',
+            'CHOMP optimize function'
+        )
         # code generation fails to compile, most likely because of a bug in
         # Py++'s generation of exposed_decl.pypp.txt.
         self.ompl_ns.member_functions('getPlannerAllocator').exclude()

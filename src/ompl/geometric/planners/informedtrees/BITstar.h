@@ -483,8 +483,7 @@ namespace ompl
             void addChompEdgesToGraph();
 
             /** \brief Call the callback and store vertices built from the state sequence. */
-            void ChompOptimize(const VertexPtr start, const VertexPtr goal, ompl::base::Cost &chomp_cost);
-
+            bool ChompOptimize(VertexPtrPair edge, ompl::base::Cost &chomp_cost);
 
             // /** \brief Get the vertices built from the chomp sequence. */
             // const VertexPtrVector &getChompVertices() const;

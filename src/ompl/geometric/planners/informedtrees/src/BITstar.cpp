@@ -310,27 +310,28 @@ namespace ompl
         void BITstar::setChompOptimizeFn(const ChompOptimizeFn &fn)
         {
             ChompOptimizeFn_ = fn;
+            std::cout << " BITstar::setChompOptimizeFn : loaded the python function into c++" << std::endl;
         }
 
-        void BITstar::ChompOptimize(const VertexPtr start, const VertexPtr goal, ompl::base::Cost &chomp_cost)
+        bool BITstar::ChompOptimize(VertexPtrPair edge, ompl::base::Cost &chomp_cost)
         {   
             clearChompVertices();
             clearChompVertexPairs();
 
             if (!ChompOptimizeFn_)
             {
-                chomp_cost = costHelpPtr_->infiniteCost();   //TODO: start and goal vector
-                return;
+                chomp_cost = costHelpPtr_->trueEdgeCost(edge);   //TODO: start and goal vector
+                return false;
             }
 
-            std::vector<std::vector<double>> waypoints = ChompOptimizeFn_(start->state(), goal->state());
+            std::vector<std::vector<double>> waypoints = ChompOptimizeFn_(edge.first->state(), edge.second->state());
 
             // TODO: add a check if start and goal match with the input
 
             if (waypoints.size() <= 2)
             {
-                chomp_cost = costHelpPtr_->infiniteCost();
-                return;
+                chomp_cost = costHelpPtr_->trueEdgeCost(edge);
+                return false;
             }
 
             chomp_cost = costHelpPtr_->identityCost();
@@ -339,31 +340,64 @@ namespace ompl
             chomp_vertex_pair_vector_.reserve(waypoints.size()-1);
 
             // Start vertex is copied from original ones
-            chomp_vertex_vector_.push_back(start);
+            chomp_vertex_vector_.push_back(edge.first);
 
+            std::cout << "number of waypoint : " << waypoints.size() << std::endl;
             for (size_t i = 1; i < waypoints.size() - 1; i++)
             {
                 auto vertex = std::make_shared<Vertex>(Planner::si_, costHelpPtr_.get(), queuePtr_.get(), graphPtr_->getApproximationIdPtr(), false);
                 
+                if (!vertex->state())
+                {
+                    std::cerr << "Vertex has null state() before copyFromReals\n";
+                    return false;
+                }
+                std::cout << "waypoint at " << i << " size : " << waypoints[i].size() << std::endl;
                 Planner::si_->getStateSpace()->copyFromReals(vertex->state(), waypoints[i]);
-
-                chomp_vertex_vector_.push_back(std::move(vertex));
+                std::cout << "copy of data into state of the vector worked : " << waypoints[i].size() << std::endl;
+                
+                chomp_vertex_vector_.push_back(vertex);
+                std::cout << "chomp_vertex_vector_ push back of vertex worked : " << std::endl;
             }
             
             // Goal vertex is copied from original ones
-            chomp_vertex_vector_.push_back(goal);
+            chomp_vertex_vector_.push_back(edge.second);
+            std::cout << "chomp_vertex_vector_ push back of GOAL vertex worked : " << std::endl;
+            
+            std::cout << "number of waypoint : " << waypoints.size() << std::endl;
+            std::cout << "chomp_vertex_vector_ size : " << chomp_vertex_vector_.size() << std::endl;
+            std::cout << "chomp_vertex_pair_vector_.size() = " << chomp_vertex_pair_vector_.size() << "\n";
 
-            for(size_t i = 0; i < chomp_vertex_vector_.size()-1; i++)
+            
+            for(size_t i = 0; i < waypoints.size()-1; i++)
             {   
+                std::cout << "chomp_vertex_pair_vector_ BEFORE 1 edge worked : " << std::endl;
+
+                std::cout << "i=" << i << " / " << chomp_vertex_vector_.size() << std::endl;
+
+                auto &v0 = chomp_vertex_vector_.at(i);
+                auto &v1 = chomp_vertex_vector_.at(i + 1);
+
+                if (!v0 || !v1) {
+                    std::cerr << "nullptr vertex at i=" << i << std::endl;
+                    return false;
+                }
+
+                std::cout << "chomp_vertex_pair_vector_ BEFORE 2 edge worked" << std::endl;
+
                 VertexPtrPair edge(chomp_vertex_vector_[i], chomp_vertex_vector_[i+1]);
-
-                chomp_vertex_pair_vector_.push_back(std::move(edge));
-
+                std::cout << "chomp_vertex_pair_vector_ AFTER edge worked : " << std::endl;
+                
                 // c_hat(v,x)
                 ompl::base::Cost edge_cost = costHelpPtr_->edgeCostHeuristic(edge);   //Note this is heurestic cost
                 
                 chomp_cost = costHelpPtr_->combineCosts(chomp_cost, edge_cost);
+                
+                chomp_vertex_pair_vector_.push_back(edge);
             }
+            std::cout << "ChompOptimize in bit* worked fine" << std::endl;
+            
+            return true;
         }
 
         void BITstar::addChompEdgesToGraph()
@@ -692,23 +726,21 @@ namespace ompl
 
                         need_to_call_chomp_ ++;
 
-                        ompl::base::Cost chomp_cost = costHelpPtr_->identityCost();
+                        ompl::base::Cost edge_cost = costHelpPtr_->identityCost();
 
-                        this->ChompOptimize(edge.first, edge.second, chomp_cost);
+                        bool is_chomp = this->ChompOptimize(edge, edge_cost);
 
-                        ompl::base::Cost edge_cost;
-                        bool is_chomp = false;
-                        if (costHelpPtr_->isFinite(chomp_cost))
-                        {
-                            edge_cost = chomp_cost;
-                            is_chomp = true;
-                        }
-                        else
-                        {
-                            edge_cost = costHelpPtr_->trueEdgeCost(edge);
-                        }
-                        
-                        // TODO: maybe! check if chomp cost is finitie and better than true edge cost?
+                        // ompl::base::Cost edge_cost;
+                        // bool is_chomp = false;
+                        // if (costHelpPtr_->isFinite(chomp_cost))
+                        // {
+                        //     edge_cost = chomp_cost;
+                        //     is_chomp = true;
+                        // }
+                        // else
+                        // {
+                        //     edge_cost = costHelpPtr_->trueEdgeCost(edge);
+                        // }
 
                         // Can this actual edge ever improve our solution?
                         // g_hat(v) + c(v,x) + h_hat(x) < g_t(x_g)?
@@ -746,6 +778,15 @@ namespace ompl
                                     if(is_chomp)
                                     {   
                                         addChompEdgesToGraph();
+                                        // If the vertex hasn't already been expanded, insert its outgoing edges
+                                        if (!edge.second->isExpandedOnCurrentSearch())
+                                        {
+                                            queuePtr_->insertOutgoingEdges(edge.second);
+                                        }
+                                        else  // If the vertex has already been expanded, remember it as inconsistent.
+                                        {
+                                            queuePtr_->addToInconsistentSet(edge.second);
+                                        }
                                     }
                                     else
                                     {
