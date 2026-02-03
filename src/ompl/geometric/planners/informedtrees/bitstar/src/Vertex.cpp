@@ -74,7 +74,14 @@
             throw ompl::Exception("Attempting to access a pruned vertex."); \
         }
 #else
-    #define PRINT_VERTEX_CHANGE
+    #define TRACK_VERTEX_ID 0
+    /** \brief A helper function to print out every function called on vertex "TRACK_VERTEX_ID" that changes it */
+
+    #define PRINT_VERTEX_CHANGE \
+        if (id_ == TRACK_VERTEX_ID) \
+        { \
+            std::cout << "Vertex " << id_ << ": " << __func__ << "" << std::endl; \
+        }
     #define ASSERT_NOT_PRUNED
 #endif  // BITSTAR_DEBUG
 

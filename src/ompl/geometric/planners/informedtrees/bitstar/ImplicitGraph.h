@@ -277,6 +277,8 @@ namespace ompl
              * The check should always be g^(v) + h^(v) >= g_t(x_g). */
             bool canSampleBePruned(const VertexPtr &sample) const;
 
+            void incrementNumStates();
+
         private:
             // ---
             // High-level primitives updating the graph.

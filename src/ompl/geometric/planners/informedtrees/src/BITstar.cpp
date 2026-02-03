@@ -342,52 +342,28 @@ namespace ompl
             // Start vertex is copied from original ones
             chomp_vertex_vector_.push_back(edge.first);
 
-            std::cout << "number of waypoint : " << waypoints.size() << std::endl;
             for (size_t i = 1; i < waypoints.size() - 1; i++)
             {
+                std::cout << "waypoint[" << i << "] =  [";
+                for (double pt: waypoints[i])
+                    std::cout << pt << ", \t'";
+                
+                std::cout << "]" << std::endl;
+
                 auto vertex = std::make_shared<Vertex>(Planner::si_, costHelpPtr_.get(), queuePtr_.get(), graphPtr_->getApproximationIdPtr(), false);
                 
-                if (!vertex->state())
-                {
-                    std::cerr << "Vertex has null state() before copyFromReals\n";
-                    return false;
-                }
-                std::cout << "waypoint at " << i << " size : " << waypoints[i].size() << std::endl;
                 Planner::si_->getStateSpace()->copyFromReals(vertex->state(), waypoints[i]);
-                std::cout << "copy of data into state of the vector worked : " << waypoints[i].size() << std::endl;
                 
                 chomp_vertex_vector_.push_back(vertex);
-                std::cout << "chomp_vertex_vector_ push back of vertex worked : " << std::endl;
             }
             
             // Goal vertex is copied from original ones
             chomp_vertex_vector_.push_back(edge.second);
-            std::cout << "chomp_vertex_vector_ push back of GOAL vertex worked : " << std::endl;
-            
-            std::cout << "number of waypoint : " << waypoints.size() << std::endl;
-            std::cout << "chomp_vertex_vector_ size : " << chomp_vertex_vector_.size() << std::endl;
-            std::cout << "chomp_vertex_pair_vector_.size() = " << chomp_vertex_pair_vector_.size() << "\n";
-
             
             for(size_t i = 0; i < waypoints.size()-1; i++)
             {   
-                std::cout << "chomp_vertex_pair_vector_ BEFORE 1 edge worked : " << std::endl;
-
-                std::cout << "i=" << i << " / " << chomp_vertex_vector_.size() << std::endl;
-
-                auto &v0 = chomp_vertex_vector_.at(i);
-                auto &v1 = chomp_vertex_vector_.at(i + 1);
-
-                if (!v0 || !v1) {
-                    std::cerr << "nullptr vertex at i=" << i << std::endl;
-                    return false;
-                }
-
-                std::cout << "chomp_vertex_pair_vector_ BEFORE 2 edge worked" << std::endl;
-
                 VertexPtrPair edge(chomp_vertex_vector_[i], chomp_vertex_vector_[i+1]);
-                std::cout << "chomp_vertex_pair_vector_ AFTER edge worked : " << std::endl;
-                
+                this->whitelistEdge(edge);
                 // c_hat(v,x)
                 ompl::base::Cost edge_cost = costHelpPtr_->edgeCostHeuristic(edge);   //Note this is heurestic cost
                 
@@ -395,8 +371,18 @@ namespace ompl
                 
                 chomp_vertex_pair_vector_.push_back(edge);
             }
-            std::cout << "ChompOptimize in bit* worked fine" << std::endl;
+            std::cout << "number of waypoint : " << waypoints.size() << std::endl;
+            std::cout << "chomp_vertex_vector_ size : " << chomp_vertex_vector_.size() << std::endl;
+            std::cout << "chomp_vertex_pair_vector_.size() = " << chomp_vertex_pair_vector_.size() << "\n";
+            std::vector<double> out;
+            std::cout << "Resizing out to dimension  " << Planner::si_->getStateSpace()->getDimension() << std::endl;
+            out.resize(Planner::si_->getStateSpace()->getDimension());
+            Planner::si_->getStateSpace()->copyFromReals(chomp_vertex_vector_[1]->state(), out);
+            std::cout << "a random state =  [";
+            for (double ou: out)
+                std::cout << ou << ",\t";
             
+            std::cout << "]" << std::endl;
             return true;
         }
 
@@ -420,7 +406,12 @@ namespace ompl
                     // Add a child to the parent.
                     chomp_vertex_pair_vector_[i].first->addChild(chomp_vertex_pair_vector_[i].second);
                     
-                    // Add the vertex to the set of vertices.
+                    // Add the vertex to the graph except last beacuse that one already exists
+                    if (i!=chomp_vertex_pair_vector_.size()-1)
+                    {
+                        graphPtr_->addToSamples(chomp_vertex_pair_vector_[i].second);
+                        graphPtr_->incrementNumStates();
+                    }
                     graphPtr_->registerAsVertex(chomp_vertex_pair_vector_[i].second);
                 }
             }
@@ -710,15 +701,10 @@ namespace ompl
                 {   
                     // What about improving the current graph?
                     // g_t(v) + c_hat(v,x)  < g_t(x)?
-                    // *************** BHAVIKA CHAWLA ***************
-                    // g_t(v) + σ(v,x)  < g_t(x)?
                     if (costHelpPtr_->isCostBetterThan(costHelpPtr_->currentHeuristicToTarget(edge),
                                                        edge.second->getCost()))
                     {
                         // Ok, so it *could* be a useful edge. Do the work of calculating its cost for real
-
-                        // Get the true cost of the edge
-                        // ompl::base::Cost trueEdgeCost = costHelpPtr_->trueEdgeCost(edge);
                         
                         // *************** BHAVIKA CHAWLA ***************
                         // Optimize Edge using CHOMP  s((vm, xm))
@@ -730,18 +716,6 @@ namespace ompl
 
                         bool is_chomp = this->ChompOptimize(edge, edge_cost);
 
-                        // ompl::base::Cost edge_cost;
-                        // bool is_chomp = false;
-                        // if (costHelpPtr_->isFinite(chomp_cost))
-                        // {
-                        //     edge_cost = chomp_cost;
-                        //     is_chomp = true;
-                        // }
-                        // else
-                        // {
-                        //     edge_cost = costHelpPtr_->trueEdgeCost(edge);
-                        // }
-
                         // Can this actual edge ever improve our solution?
                         // g_hat(v) + c(v,x) + h_hat(x) < g_t(x_g)?
                         // *************** BHAVIKA CHAWLA ***************
@@ -752,21 +726,19 @@ namespace ompl
                                 bestCost_))
                         {
                             // Does this edge have a collision? 
-                            bool is_collision_free = false;
+                            bool is_collision_free = true;
                             if(!is_chomp)
                             {
                                 is_collision_free = this->checkEdge(edge);
-                            }
-                            else
-                            {
-                                is_collision_free = true;
                             }
 
                             if (is_collision_free)
                             {   
                                 // Remember that this edge has passed the collision checks.
-                                this->whitelistEdge(edge);
-
+                                if(!is_chomp)    //Already whitelisted in chomp optimize if false
+                                {
+                                    this->whitelistEdge(edge);
+                                }
                                 // Does the current edge improve our graph?
                                 // g_t(v) + c(v,x) < g_t(x)?
                                 // *************** BHAVIKA CHAWLA ***************
@@ -882,7 +854,8 @@ namespace ompl
 
                     // Increment the pruning counter:
                     ++numPrunings_;
-
+                    
+                    std::cout << " ***** BIT* Prune() " << std::endl;
                     // Prune the graph.
                     std::pair<unsigned int, unsigned int> numPruned = graphPtr_->prune(informedMeasure);
 

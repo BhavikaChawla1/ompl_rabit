@@ -1737,6 +1737,11 @@ namespace ompl
         {
             return numStateCollisionChecks_;
         }
+
+        void BITstar::ImplicitGraph::incrementNumStates()
+        {
+            ++numSamples_;
+        }
         /////////////////////////////////////////////////////////////////////////////////////////////
     }  // namespace geometric
 }  // namespace ompl
