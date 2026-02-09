@@ -123,6 +123,8 @@ namespace ompl
                                        [this] { return edgeCollisionCheckProgressProperty(); });
             addPlannerProgressProperty("nearest neighbour calls INTEGER",
                                        [this] { return nearestNeighbourProgressProperty(); });
+            
+            this->setLogFile();
 
             // Extra progress info that aren't necessary for every day use. Uncomment if desired.
             /*
@@ -183,8 +185,8 @@ namespace ompl
                 // See if we have an optimization objective
                 if (!Planner::pdef_->hasOptimizationObjective())
                 {
-                    OMPL_INFORM("%s: No optimization objective specified. Defaulting to optimizing path length.",
-                                Planner::getName().c_str());
+                    // OMPL_INFORM("%s: No optimization objective specified. Defaulting to optimizing path length.",
+                    //             Planner::getName().c_str());
                     Planner::pdef_->setOptimizationObjective(
                         std::make_shared<base::PathLengthOptimizationObjective>(Planner::si_));
                 }
@@ -311,6 +313,7 @@ namespace ompl
         {
             ChompOptimizeFn_ = fn;
             std::cout << " BITstar::setChompOptimizeFn : loaded the python function into c++" << std::endl;
+            this->rabit_star_ = true;
         }
 
         bool BITstar::ChompOptimize(VertexPtrPair edge, ompl::base::Cost &chomp_cost)
@@ -377,7 +380,7 @@ namespace ompl
             std::vector<double> out;
             std::cout << "Resizing out to dimension  " << Planner::si_->getStateSpace()->getDimension() << std::endl;
             out.resize(Planner::si_->getStateSpace()->getDimension());
-            Planner::si_->getStateSpace()->copyFromReals(chomp_vertex_vector_[1]->state(), out);
+            Planner::si_->getStateSpace()->copyToReals(out, chomp_vertex_vector_[1]->state());
             std::cout << "a random state =  [";
             for (double ou: out)
                 std::cout << ou << ",\t";
@@ -411,6 +414,7 @@ namespace ompl
                     {
                         graphPtr_->addToSamples(chomp_vertex_pair_vector_[i].second);
                         graphPtr_->incrementNumStates();
+                        this->chomp_num_vertices_added_++;
                     }
                     graphPtr_->registerAsVertex(chomp_vertex_pair_vector_[i].second);
                 }
@@ -440,11 +444,11 @@ namespace ompl
         ompl::base::PlannerStatus BITstar::solve(const ompl::base::PlannerTerminationCondition &ptc)
         {
             // Check that Planner::setup_ is true, if not call this->setup()
-            auto start = std::chrono::high_resolution_clock::now();
+            // auto start = std::chrono::high_resolution_clock::now();
             Planner::checkValidity();
-            auto end = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> elapsed = end - start;    
-            std::cout << "***  Planner::checkValidity()  Time taken : " << elapsed.count() << " seconds\n"; 
+            // auto end = std::chrono::high_resolution_clock::now();
+            // std::chrono::duration<double> elapsed = end - start;    
+            // std::cout << "***  Planner::checkValidity()  Time taken : " << elapsed.count() << " seconds\n"; 
 
             // Assert setup succeeded
             if (!Planner::setup_)
@@ -454,7 +458,7 @@ namespace ompl
             }
             // No else
 
-            OMPL_INFORM("%s: Searching for a solution to the given planning problem.", Planner::getName().c_str());
+            // OMPL_INFORM("%s: Searching for a solution to the given planning problem.", Planner::getName().c_str());
 
             // Reset the manual stop to the iteration loop:
             stopLoop_ = false;
@@ -492,6 +496,9 @@ namespace ompl
                 queuePtr_->insertOutgoingEdgesOfStartVertices();
             }
 
+            // Record start time stamp
+            this->start_time_ = std::chrono::high_resolution_clock::now(); 
+
             /* Iterate as long as:
               - We're allowed (ptc == false && stopLoop_ == false), AND
               - We haven't found a good enough solution (costHelpPtr_->isSatisfied(bestCost) == false),
@@ -501,25 +508,25 @@ namespace ompl
                 - There is are start/goal states we've yet to consider (pis_.haveMoreStartStates() == true ||
               pis_.haveMoreGoalStates() == true)
             */
-            size_t total_time_chomp_was_needed_ = 0;
             while (!ptc && !stopLoop_ && !costHelpPtr_->isSatisfied(bestCost_) &&
                    (costHelpPtr_->isCostBetterThan(graphPtr_->minCost(), bestCost_) ||
                     Planner::pis_.haveMoreStartStates() || Planner::pis_.haveMoreGoalStates()))
             {
                 this->iterate();
-                std::cout << "number of times chomp was needed : " << need_to_call_chomp_ << std::endl;
-                total_time_chomp_was_needed_ += need_to_call_chomp_;
             }
             
-            std::cout << "Total times chomp was needed : " << total_time_chomp_was_needed_ << std::endl << std::endl;
+            std::cout << "number of times chomp was needed : " << chomp_counter_ << std::endl;
             // Announce
             if (hasExactSolution_)
             {
-                this->endSuccessMessage();
+                // this->endSuccessMessage();
+                // this->statusMessage(ompl::msg::LOG_INFO, "Success!!!");
+                this->endLogMessage();
             }
             else
             {
-                this->endFailureMessage();
+                // this->endFailureMessage();
+                this->endLogMessage();
             }
 
             // Publish
@@ -710,11 +717,13 @@ namespace ompl
                         // Optimize Edge using CHOMP  s((vm, xm))
                         // σ(v,x) = CHOMP::optimal_path()
 
-                        need_to_call_chomp_ ++;
+                        this->chomp_counter_ ++;
 
                         ompl::base::Cost edge_cost = costHelpPtr_->identityCost();
 
                         bool is_chomp = this->ChompOptimize(edge, edge_cost);
+
+                        if(is_chomp) this->chomp_success_counter_++;
 
                         // Can this actual edge ever improve our solution?
                         // g_hat(v) + c(v,x) + h_hat(x) < g_t(x_g)?
@@ -749,7 +758,8 @@ namespace ompl
                                 {   
                                     if(is_chomp)
                                     {   
-                                        addChompEdgesToGraph();
+                                        this->chomp_num_edges_used_++;
+                                        this->addChompEdgesToGraph();
                                         // If the vertex hasn't already been expanded, insert its outgoing edges
                                         if (!edge.second->isExpandedOnCurrentSearch())
                                         {
@@ -865,8 +875,8 @@ namespace ompl
                     // Also store the measure.
                     prunedMeasure_ = informedMeasure;
 
-                    OMPL_INFORM("%s: Pruning disconnected %d vertices from the tree and completely removed %d samples.",
-                                Planner::getName().c_str(), numPruned.first, numPruned.second);
+                    // OMPL_INFORM("%s: Pruning disconnected %d vertices from the tree and completely removed %d samples.",
+                    //             Planner::getName().c_str(), numPruned.first, numPruned.second);
                 }
             }
             // No else.
@@ -1143,7 +1153,16 @@ namespace ompl
                 stopLoop_ = stopOnSolutionChange_;
 
                 // Brag:
-                this->goalMessage();
+                // this->goalMessage();
+                if(this->solved_atleast_once_ == false)
+                {   
+                    this->startLogMessage();
+                    this->solved_atleast_once_ = true;
+                }
+                else
+                {
+                    this->logMessage();
+                }
 
                 // If enabled, pass the intermediate solution back through the call back:
                 if (static_cast<bool>(Planner::pdef_->getIntermediateSolutionCallback()))
@@ -1271,6 +1290,152 @@ namespace ompl
                 }
             }
             // No else, this message is below the log level
+        }
+
+        void BITstar::startLogMessage()
+        {   
+            std::stringstream outputStream;
+            outputStream << "{\n";
+            outputStream << "\"Start\" : {";
+            outputStream << "\"solved_atleast_once\" : " << (this->solved_atleast_once_ ? "true" : "false");
+
+
+             // Time elapsed since start:
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = end - this->start_time_;
+            outputStream << ", \"time_to_first_solution\" : " << elapsed.count();
+            outputStream << ", \"path_cost\" : " << bestCost_.value();
+
+            // The number of iterations
+            outputStream << ", \"num_iterations\" : " << numIterations_;
+
+            // Trajectory
+            outputStream << ", \"trajectory\" : "
+                        << this->getSolutionPathJsonFormat();
+
+            outputStream << "},\n";
+            outputStream << "\"logs\" : [\n";
+
+            OMPL_INFORM("%s", outputStream.str().c_str());
+
+            this->logMessage();
+        }
+
+        void BITstar::logMessage()
+        {
+            std::stringstream outputStream;
+
+            if (this->solved_atleast_once_)
+            {
+                outputStream << ", {";
+            }
+            else
+            {
+                outputStream << "{";
+            }
+
+            // Time elapsed since start:
+            auto end = std::chrono::high_resolution_clock::now();
+            this->time_to_last_solution_ = end - this->start_time_;
+            outputStream << "\"time_elapsed_since_start\" : " << time_to_last_solution_.count();
+
+            outputStream << ", \"path_cost\" : " << bestCost_.value();
+            outputStream << ", \"num_batches\" : " << numBatches_;
+            outputStream << ", \"num_iterations\" : " << numIterations_;
+            outputStream << ", \"num_graph_vertices\" : " << graphPtr_->numVertices();
+            outputStream << ", \"num_free_states\" : " << graphPtr_->numSamples();
+            outputStream << ", \"num_queue_edges\" : " << queuePtr_->numEdges();
+            outputStream << ", \"num_samples_generated\" : " << graphPtr_->numStatesGenerated();
+            outputStream << ", \"num_vertices_ever_in_graph\" : " << graphPtr_->numVerticesConnected();
+            outputStream << ", \"num_prunings\" : " << numPrunings_;
+            outputStream << ", \"num_rewirings\" : " << numRewirings_;
+            outputStream << ", \"num_state_collision_checks\" : "
+                        << graphPtr_->numStateCollisionChecks();
+            outputStream << ", \"num_edge_collision_checks\" : "
+                        << numEdgeCollisionChecks_;
+
+            if (this->rabit_star_ == true)
+            {
+               outputStream << ", \"chomp_counter\" : " << this->chomp_counter_;
+               outputStream << ", \"chomp_success_counter\" : " << this->chomp_success_counter_;
+               outputStream << ", \"chomp_num_edges_used\" : " << this->chomp_num_edges_used_;
+               outputStream << ", \"chomp_num_vertices_added\" : " << this->chomp_num_vertices_added_;
+            }
+
+            outputStream << "}\n";
+
+            OMPL_INFORM("%s", outputStream.str().c_str());
+        }
+
+        void BITstar::endLogMessage()
+        {
+            std::stringstream outputStream;
+
+            outputStream << "],\n";
+            outputStream << "\"End\" : {";
+            outputStream << "\"solved_atleast_once\" : " << (this->solved_atleast_once_ ? "true" : "false");
+
+            // Time elapsed since start:
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = end - this->start_time_;
+            outputStream << ", \"time_to_last_solution\" : " << this->time_to_last_solution_.count();
+            outputStream << ", \"path_cost\" : " << bestCost_.value();
+
+            outputStream << ", \"num_iterations\" : " << numIterations_;
+
+            outputStream << ", \"trajectory\" : "
+                        << this->getSolutionPathJsonFormat();
+
+            outputStream << "}\n";
+            outputStream << "}";
+
+            OMPL_INFORM("%s", outputStream.str().c_str());
+        }
+
+        std::string BITstar::getSolutionPathJsonFormat()
+        {
+            // Assuming you have access to Planner::pdef_ and Planner::si_
+            std::ostringstream oss;
+            oss << "[";
+
+            auto reversePath = this->bestPathFromGoalToStart();  // goal->start
+
+            std::vector<double> reals;
+            reals.resize(Planner::si_->getStateSpace()->getDimension());
+
+            // iterate from end to start to get start->goal
+            for (std::size_t idx = reversePath.size(); idx-- > 0; )
+            {
+                Planner::si_->getStateSpace()->copyToReals(reals, reversePath[idx]);
+
+                oss << "[";
+                for (std::size_t j = 0; j < reals.size(); ++j)
+                {
+                    if (j) oss << ",";
+                    oss << reals[j];
+                }
+                oss << "]";
+
+                if (idx != 0) oss << ",";
+            }
+            oss << "]";
+            return oss.str();
+        }
+
+        void BITstar::setLogFile()
+        {   
+            std::string method_name = "bit_star";
+            if (this->rabit_star_ == true)
+            {
+                method_name = "rabit_star";
+            }
+            std::string path_name = "/home/bhavika.chawla/master_thesis/logs/";
+            auto ts = ompl::time::as_string(ompl::time::now());
+            std::replace(ts.begin(), ts.end(), ' ', '_');
+            std::replace(ts.begin(), ts.end(), ':', '-'); 
+            std::string file_name = path_name + method_name + "/" + method_name + "_"+ ts + ".json";
+            this->logFileHandler_.reset(new ompl::msg::OutputHandlerFile(file_name.c_str()));
+            ompl::msg::useOutputHandler(logFileHandler_.get());
         }
         /////////////////////////////////////////////////////////////////////////////////////////////
 

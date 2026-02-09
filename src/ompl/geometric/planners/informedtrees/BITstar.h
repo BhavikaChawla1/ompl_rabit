@@ -599,8 +599,40 @@ namespace ompl
             
             /** \brief Cost of the chomp_trajectory */
             ompl::base::Cost chomp_cost;
+            
+            /** \brief Counter that keeps track of the number of times CHOMP was called */
+            size_t chomp_counter_ = 0;
+            
+            /** \brief Counter that keeps track of the number of times CHOMP was called and gave a collision free path successfully*/
+            size_t chomp_success_counter_ = 0;
 
-            size_t need_to_call_chomp_ = 0;
+            /** \brief Counter that keeps track of the number of collision free edges CHOMP has contributed to*/
+            size_t chomp_num_edges_used_ = 0;
+            
+            /** \brief Counter that keeps track of the number of CHOMP vertices added into the graph and samples*/
+            size_t chomp_num_vertices_added_ = 0;
+
+            /** \brief Bool for rabit_star */
+            bool rabit_star_ = false;
+            
+            /** \brief Instance of the log file handler from utils/Console.h */
+            std::unique_ptr<ompl::msg::OutputHandlerFile> logFileHandler_;
+
+            void setLogFile();
+
+            std::chrono::high_resolution_clock::time_point start_time_;
+
+            std::chrono::duration<double> time_to_last_solution_ = std::chrono::duration<double>::zero();;
+
+            bool solved_atleast_once_ = false;
+
+            // For logs
+            void startLogMessage();
+            void logMessage();
+            void endLogMessage();
+            std::string getSolutionPathJsonFormat();
+
+
         };  // class BITstar
     }       // namespace geometric
 }  // namespace ompl
