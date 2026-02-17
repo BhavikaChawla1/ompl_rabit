@@ -124,8 +124,6 @@ namespace ompl
             addPlannerProgressProperty("nearest neighbour calls INTEGER",
                                        [this] { return nearestNeighbourProgressProperty(); });
             
-            this->setLogFile();
-
             // Extra progress info that aren't necessary for every day use. Uncomment if desired.
             /*
             addPlannerProgressProperty("edge queue size INTEGER", [this]
@@ -169,6 +167,13 @@ namespace ompl
 
         BITstar::~BITstar()
         {
+            // If we installed a custom global output handler, restore the previous one before
+            // logFileHandler_ is destroyed (avoids dangling global pointer).
+            if (logFileHandler_ && ompl::msg::getOutputHandler() == logFileHandler_.get())
+            {
+                ompl::msg::useOutputHandler(previousOutputHandler_);
+            }
+
             clearChompVertices();
             clearChompVertexPairs();
         }
@@ -336,6 +341,12 @@ namespace ompl
                 chomp_cost = costHelpPtr_->trueEdgeCost(edge);
                 return false;
             }
+            
+            // if(costHelpPtr_->trueEdgeCost(edge).value() > 2.0)  //TODO: make this a parameter
+            // {
+            //     chomp_cost = costHelpPtr_->trueEdgeCost(edge);
+            //     return false;
+            // }
 
             chomp_cost = costHelpPtr_->identityCost();
 
@@ -356,6 +367,8 @@ namespace ompl
                 auto vertex = std::make_shared<Vertex>(Planner::si_, costHelpPtr_.get(), queuePtr_.get(), graphPtr_->getApproximationIdPtr(), false);
                 
                 Planner::si_->getStateSpace()->copyFromReals(vertex->state(), waypoints[i]);
+                // std::cout << "[BIT* queue trace] BITstar::ChompOptimize created-intermediate-vertex id="
+                //           << vertex->getId() << " from_waypoint_index=" << i << std::endl;
                 
                 chomp_vertex_vector_.push_back(vertex);
             }
@@ -393,6 +406,9 @@ namespace ompl
         {   
             for(size_t i = 0; i < chomp_vertex_pair_vector_.size(); i++)
             {
+                // std::cout << "[BIT* queue trace] BITstar::addChompEdgesToGraph processing-edge ("
+                //           << chomp_vertex_pair_vector_[i].first->getId() << "->"
+                //           << chomp_vertex_pair_vector_[i].second->getId() << ")" << std::endl;
                 ompl::base::Cost edge_cost = costHelpPtr_->edgeCostHeuristic(chomp_vertex_pair_vector_[i]);
                 
                 // If the child already has a parent, this is a rewiring.
@@ -415,6 +431,8 @@ namespace ompl
                         graphPtr_->addToSamples(chomp_vertex_pair_vector_[i].second);
                         graphPtr_->incrementNumStates();
                         this->chomp_num_vertices_added_++;
+                        // std::cout << "[BIT* queue trace] BITstar::addChompEdgesToGraph added-sample vertex="
+                        //           << chomp_vertex_pair_vector_[i].second->getId() << std::endl;
                     }
                     graphPtr_->registerAsVertex(chomp_vertex_pair_vector_[i].second);
                 }
@@ -443,6 +461,8 @@ namespace ompl
 
         ompl::base::PlannerStatus BITstar::solve(const ompl::base::PlannerTerminationCondition &ptc)
         {
+            this->setLogFile();
+
             // Check that Planner::setup_ is true, if not call this->setup()
             // auto start = std::chrono::high_resolution_clock::now();
             Planner::checkValidity();
@@ -701,7 +721,7 @@ namespace ompl
                     queuePtr_->insertOutgoingEdges(edge.second);
                 }
                 // In the best case, can this edge improve our solution given the current graph?
-                // g_t(v) + c_hat(v,x) + h_hat(x) < g_t(x_g)?
+                // g_t(v) + c_hat(v,x) + h_hat(x) < best_path_cost_so_far?
                 else if (costHelpPtr_->isCostBetterThan(
                              costHelpPtr_->inflateCost(costHelpPtr_->currentHeuristicEdge(edge), truncationFactor_),
                              bestCost_))
@@ -716,14 +736,9 @@ namespace ompl
                         // *************** BHAVIKA CHAWLA ***************
                         // Optimize Edge using CHOMP  s((vm, xm))
                         // σ(v,x) = CHOMP::optimal_path()
-
-                        this->chomp_counter_ ++;
-
-                        ompl::base::Cost edge_cost = costHelpPtr_->identityCost();
-
-                        bool is_chomp = this->ChompOptimize(edge, edge_cost);
-
-                        if(is_chomp) this->chomp_success_counter_++;
+                        
+                        ompl::base::Cost edge_cost = costHelpPtr_->trueEdgeCost(edge);
+                        // ompl::base::Cost edge_cost = costHelpPtr_->identityCost();
 
                         // Can this actual edge ever improve our solution?
                         // g_hat(v) + c(v,x) + h_hat(x) < g_t(x_g)?
@@ -736,9 +751,22 @@ namespace ompl
                         {
                             // Does this edge have a collision? 
                             bool is_collision_free = true;
-                            if(!is_chomp)
+                            
+                            is_collision_free = this->checkEdge(edge);
+                            
+                            // CHOMP STUFF
+                            bool is_chomp = false;
+                            if(!is_collision_free && numBatches_ > 1 )  // && edge_cost.value() < 1.0 )
                             {
-                                is_collision_free = this->checkEdge(edge);
+                                std::cout << "Num Batches_ when chomp is called: " << numBatches_ << std::endl;
+                                std::cout << "edge_cost.value() when chomp is called: " << edge_cost.value() << std::endl;
+                                this->chomp_counter_ ++;
+                                is_chomp = this->ChompOptimize(edge, edge_cost);
+                                if(is_chomp)
+                                {
+                                    this->chomp_success_counter_++;
+                                    is_collision_free = true;
+                                }
                             }
 
                             if (is_collision_free)
@@ -1383,8 +1411,15 @@ namespace ompl
 
             outputStream << ", \"num_iterations\" : " << numIterations_;
 
-            outputStream << ", \"trajectory\" : "
-                        << this->getSolutionPathJsonFormat();
+            outputStream << ", \"trajectory\" : ";
+            if(this->solved_atleast_once_)
+            {
+                outputStream << this->getSolutionPathJsonFormat();
+            }
+            else
+            {
+                outputStream << "[]";
+            }
 
             outputStream << "}\n";
             outputStream << "}";
@@ -1434,6 +1469,7 @@ namespace ompl
             std::replace(ts.begin(), ts.end(), ' ', '_');
             std::replace(ts.begin(), ts.end(), ':', '-'); 
             std::string file_name = path_name + method_name + "/" + method_name + "_"+ ts + ".json";
+            previousOutputHandler_ = ompl::msg::getOutputHandler();
             this->logFileHandler_.reset(new ompl::msg::OutputHandlerFile(file_name.c_str()));
             ompl::msg::useOutputHandler(logFileHandler_.get());
         }

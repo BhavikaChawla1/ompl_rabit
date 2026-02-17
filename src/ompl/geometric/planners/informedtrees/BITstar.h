@@ -51,6 +51,12 @@
 
 namespace ompl
 {
+    namespace msg
+    {
+        class OutputHandler;
+        class OutputHandlerFile;
+    }
+
     namespace geometric
     {
         /**
@@ -617,6 +623,9 @@ namespace ompl
             
             /** \brief Instance of the log file handler from utils/Console.h */
             std::unique_ptr<ompl::msg::OutputHandlerFile> logFileHandler_;
+
+            /** \brief The OMPL output handler that was active before installing logFileHandler_. */
+            ompl::msg::OutputHandler *previousOutputHandler_{nullptr};
 
             void setLogFile();
 

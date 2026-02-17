@@ -105,8 +105,6 @@ namespace ompl
                 type_ = STATE_SPACE_REAL_VECTOR;
                 setName("RealVector" + getName());
                 dimensionNames_.resize(dim, "");
-
-                std::cout << " *******************  Bhavika Chawla OMPL RABIT YAYYYY!!!!! ******************** " << std::endl;
             }
 
             ~RealVectorStateSpace() override = default;

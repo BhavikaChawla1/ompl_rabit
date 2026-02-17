@@ -38,6 +38,8 @@
 #include "ompl/geometric/planners/informedtrees/bitstar/ImplicitGraph.h"
 
 // STL/Boost:
+// For std::cout
+#include <iostream>
 // For std::move
 #include <utility>
 // For smart pointers
@@ -662,6 +664,9 @@ namespace ompl
 
             // Add to the NN structure:
             samples_->add(sample);
+
+            // std::cout << "[BIT* queue trace] ImplicitGraph::addToSamples(single) vertex=" << sample->getId()
+            //           << " in_tree=" << sample->isInTree() << std::endl;
         }
 
         void BITstar::ImplicitGraph::addToSamples(const VertexPtrVector &samples)
@@ -675,6 +680,22 @@ namespace ompl
 
             // Add to the NN structure:
             samples_->add(samples);
+
+            // std::cout << "[BIT* queue trace] ImplicitGraph::addToSamples(batch) count=" << samples.size();
+            // if (!samples.empty())
+            // {
+            //     std::cout << " ids=[";
+            //     for (std::size_t i = 0; i < samples.size(); ++i)
+            //     {
+            //         std::cout << samples[i]->getId();
+            //         if (i + 1u != samples.size())
+            //         {
+            //             std::cout << ", ";
+            //         }
+            //     }
+            //     std::cout << "]";
+            // }
+            // std::cout << std::endl;
         }
 
         void BITstar::ImplicitGraph::removeFromSamples(const VertexPtr &sample)

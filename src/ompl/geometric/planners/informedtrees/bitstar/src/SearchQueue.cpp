@@ -39,6 +39,7 @@
 
 // For std::lexicographical_compare and the std::*_heap functions.
 #include <algorithm>
+#include <iostream>
 // For std::advance.
 #include <iterator>
 // For std::move.
@@ -69,6 +70,19 @@
 #endif  // BITSTAR_DEBUG
 
 using namespace std::string_literals;
+
+namespace
+{
+    void traceQueueEdgeEvent(const char *location, const char *reason,
+                             const ompl::geometric::BITstar::VertexPtrPair &edge, std::size_t queueSize)
+    {
+        std::cout << "[BIT* queue trace] " << location << " reason=" << reason << " edge=("
+                  << edge.first->getId() << "->" << edge.second->getId() << ")"
+                  << " parent[inTree=" << edge.first->isInTree() << ", root=" << edge.first->isRoot() << "]"
+                  << " child[inTree=" << edge.second->isInTree() << ", root=" << edge.second->isRoot() << "]"
+                  << " queue_size=" << queueSize << std::endl;
+    }
+}  // namespace
 
 namespace ompl
 {
@@ -168,6 +182,7 @@ namespace ompl
 #endif  // BITSTAR_DEBUG
                 updateEdge->data.first = this->createSortKey(edge);
                 edgeQueue_.update(updateEdge);
+                // traceQueueEdgeEvent("SearchQueue::enqueueEdge", "updated-existing-edge", edge, edgeQueue_.size());
             }
             else  // This edge is not yet in the queue.
             {
@@ -182,6 +197,7 @@ namespace ompl
 
                 // Push the newly created edge back on the vector of edges to the child.
                 child->insertInEdgeQueueInLookup(edgeElemPtr);
+                // traceQueueEdgeEvent("SearchQueue::enqueueEdge", "inserted-new-edge", edge, edgeQueue_.size());
             }
         }
 
@@ -245,6 +261,8 @@ namespace ompl
 
             // Remove it from the queue.
             edgeQueue_.pop();
+
+            // traceQueueEdgeEvent("SearchQueue::popFrontEdge", "popped-front-edge", frontEdge, edgeQueue_.size());
 
             // Return the edge.
             return frontEdge;
@@ -464,6 +482,9 @@ namespace ompl
                 VertexPtrVector neighbourSamples;
                 graphPtr_->nearestSamples(vertex, &neighbourSamples);
 
+                // std::cout << "[BIT* queue trace] SearchQueue::insertOutgoingEdges expanding vertex="
+                //           << vertex->getId() << " neighbour_samples=" << neighbourSamples.size() << std::endl;
+
                 // Add all outgoing edges to neighbouring vertices and samples.
                 this->enqueueEdges(vertex, neighbourSamples);
             }
@@ -564,6 +585,9 @@ namespace ompl
             // Start with this vertex' current kiddos.
             VertexPtrVector currentChildren;
             parent->getChildren(&currentChildren);
+            // std::cout << "[BIT* queue trace] SearchQueue::enqueueEdges parent=" << parent->getId()
+            //           << " current_children=" << currentChildren.size()
+            //           << " candidate_children=" << possibleChildren.size() << std::endl;
             for (const auto &child : currentChildren)
             {
                 this->enqueueEdgeConditionally(parent, child);
@@ -620,6 +644,8 @@ namespace ompl
             // Don't enqueue the edge if it's blacklisted.
             if (parent->isBlacklistedAsChild(child))
             {
+                // std::cout << "[BIT* queue trace] SearchQueue::enqueueEdgeConditionally rejected-blacklisted edge=("
+                //           << parent->getId() << "->" << child->getId() << ")" << std::endl;
                 return;
             }
             else
@@ -630,8 +656,15 @@ namespace ompl
                 // Enqueue the edge only if it can possibly improve the current solution.
                 if (this->canPossiblyImproveCurrentSolution(newEdge))
                 {
+                    // traceQueueEdgeEvent("SearchQueue::enqueueEdgeConditionally", "passed-checks-before-enqueue", newEdge,
+                    //                     edgeQueue_.size());
                     this->enqueueEdge(newEdge);
                 }
+                // else
+                // {
+                //     std::cout << "[BIT* queue trace] SearchQueue::enqueueEdgeConditionally rejected-cannot-improve "
+                //               << "edge=(" << parent->getId() << "->" << child->getId() << ")" << std::endl;
+                // }
             }
         }
 
