@@ -300,6 +300,7 @@ bool ompl::base::SpaceInformation::checkMotion(const std::vector<State *> &state
 
 bool ompl::base::SpaceInformation::checkMotion(const std::vector<State *> &states, unsigned int count) const
 {
+    // std::cout << "I am using Space Information Check motion" << std::endl;
     assert(states.size() >= count);
     if (count > 0)
     {

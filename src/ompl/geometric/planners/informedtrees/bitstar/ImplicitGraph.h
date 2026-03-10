@@ -161,6 +161,12 @@ namespace ompl
             /** \brief Add a vector of unconnected samples. */
             void addToSamples(const VertexPtrVector &samples);
 
+            /** \brief Insert a vertex into the NN structure only, without adding it to the
+             *  newSamples_ tracking list. Use this for already-connected (tree) vertices that
+             *  need to be visible to nearest-neighbour queries but must not be treated as free
+             *  samples in the next batch (e.g., CHOMP intermediate waypoints). */
+            void addToNNOnly(const VertexPtr &vertex);
+
             /** \brief Remove a sample from the sample set. */
             void removeFromSamples(const VertexPtr &sample);
 

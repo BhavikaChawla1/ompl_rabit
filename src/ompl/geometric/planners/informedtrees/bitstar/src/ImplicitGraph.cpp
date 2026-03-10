@@ -669,6 +669,17 @@ namespace ompl
             //           << " in_tree=" << sample->isInTree() << std::endl;
         }
 
+        void BITstar::ImplicitGraph::addToNNOnly(const VertexPtr &vertex)
+        {
+            ASSERT_SETUP
+
+            // Insert directly into the NN structure so the vertex is visible to
+            // nearestSamples() queries. Intentionally does NOT push to newSamples_,
+            // because this vertex is already connected to the tree and must not be
+            // treated as a free sample during the next batch's queue expansion.
+            samples_->add(vertex);
+        }
+
         void BITstar::ImplicitGraph::addToSamples(const VertexPtrVector &samples)
         {
             ASSERT_SETUP

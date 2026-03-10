@@ -382,6 +382,7 @@ namespace ompl
             /** \brief Checks an edge for collision. A wrapper to SpaceInformation->checkMotion that tracks number of
              * collision checks. */
             bool checkEdge(const VertexConstPtrPair &edge);
+            // bool checkEdge(const VertexConstPtrPair &edge, bool& is_chomp_suggested);
 
             /** \brief Blacklists an edge (useful if an edge is in collision). */
             void blacklistEdge(const VertexPtrPair &edge) const;

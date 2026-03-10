@@ -143,3 +143,242 @@ bool ompl::base::DiscreteMotionValidator::checkMotion(const State *s1, const Sta
 
     return result;
 }
+
+// // bool ompl::base::DiscreteMotionValidator::checkMotion(const State *s1, const State *s2, bool& is_chomp_suggested) const
+// // {      
+// //     is_chomp_suggested = false;
+
+// //     /* assume motion starts in a valid configuration so s1 is valid */
+// //     if (!si_->isValid(s2))
+// //     {
+// //         invalid_++;
+// //         return false;
+// //     }
+
+// //     bool result = true;
+// //     int nd = stateSpace_->validSegmentCount(s1, s2);
+
+// //     struct IntervalDepth
+// //     {
+// //         int first;
+// //         int second;
+// //         int depth;
+// //     };
+
+// //     /* initialize the queue of test positions */
+// //     std::queue<std::pair<int, int>> pos;
+// //     if (nd >= 2)
+// //     {
+// //         pos.emplace(1, nd - 1);
+
+// //         /* temporary storage for the checked state */
+// //         State *test = si_->allocState();
+
+// //         /* repeatedly subdivide the path segment in the middle (and check the middle) */
+// //         while (!pos.empty())
+// //         {
+// //             std::pair<int, int> x = pos.front();
+
+// //             int mid = (x.first + x.second) / 2;
+// //             stateSpace_->interpolate(s1, s2, (double)mid / (double)nd, test);
+
+// //             if (!si_->isValid(test))
+// //             {
+// //                 result = false;
+// //                 break;
+// //             }
+
+// //             pos.pop();
+
+// //             if (x.first < mid)
+// //                 pos.emplace(x.first, mid - 1);
+// //             if (x.second > mid)
+// //                 pos.emplace(mid + 1, x.second);
+// //         }
+
+// //         si_->freeState(test);
+// //     }
+
+// //     if (result)
+// //         valid_++;
+// //     else
+// //         invalid_++;
+
+// //     return result;
+// // }
+
+
+// bool ompl::base::DiscreteMotionValidator::checkMotion(
+//     const State *s1,
+//     const State *s2,
+//     bool& suggestChomp) const
+// {
+//     suggestChomp = false;
+
+//     if (!si_->isValid(s2))
+//     {
+//         invalid_++;
+//         return false;
+//     }
+
+//     bool result = true;
+//     int nd = stateSpace_->validSegmentCount(s1, s2);
+
+//     struct IntervalDepth
+//     {
+//         int first;
+//         int second;
+//         int depth;
+//     };
+
+//     std::queue<IntervalDepth> pos;
+
+//     if (nd >= 2)
+//     {
+//         pos.push({1, nd - 1, 0});
+
+//         State *test = si_->allocState();
+
+//         while (!pos.empty())
+//         {
+//             auto x = pos.front();
+//             pos.pop();
+
+//             if (x.first > x.second)
+//                 continue;
+
+//             int mid = (x.first + x.second) / 2;
+
+//             stateSpace_->interpolate(s1, s2,
+//                                      (double)mid / (double)nd,
+//                                      test);
+
+//             if (!si_->isValid(test))
+//             {
+//                 result = false;
+
+//                 // --------- CHOMP DECISION LOGIC ---------
+
+//                 const int D_min = 3;  // Minimum depth
+//                 double t = (double)mid / (double)nd;
+
+//                 bool deepFailure = (x.depth >= D_min);
+//                 bool midEdgeFailure = (t > 0.2 && t < 0.8);
+
+//                 if (deepFailure && midEdgeFailure)
+//                     suggestChomp = true;
+
+//                 break;
+//             }
+
+//             if (x.first <= mid - 1)
+//                 pos.push({x.first, mid - 1, x.depth + 1});
+//             if (mid + 1 <= x.second)
+//                 pos.push({mid + 1, x.second, x.depth + 1});
+//         }
+
+//         si_->freeState(test);
+//     }
+
+//     if (result)
+//         valid_++;
+//     else
+//         invalid_++;
+
+//     return result;
+// }
+
+
+// bool ompl::base::DiscreteMotionValidator::checkMotion(
+//     const State *s1, const State *s2,
+//     bool& is_chomp_) const
+// {
+//     prio = ChompPriority::SKIP;
+
+//     // assume s1 valid
+//     if (!si_->isValid(s2))
+//     {
+//         invalid_++;
+//         return false;
+//     }
+
+//     bool result = true;
+//     int nd = stateSpace_->validSegmentCount(s1, s2);
+
+//     struct Node
+//     {
+//         int first;
+//         int second;
+//         int depth;
+//     };
+
+//     std::queue<Node> pos;
+
+//     if (nd >= 2)
+//     {
+//         pos.push({1, nd - 1, 0});
+
+//         State *test = si_->allocState();
+
+//         // helper to check validity at an integer index
+//         auto isValidAtIndex = [&](int idx) -> bool
+//         {
+//             stateSpace_->interpolate(s1, s2, (double)idx / (double)nd, test);
+//             return si_->isValid(test);
+//         };
+
+//         while (!pos.empty())
+//         {
+//             Node x = pos.front();
+//             pos.pop();
+
+//             if (x.first > x.second)
+//                 continue;
+
+//             int mid = (x.first + x.second) / 2;
+
+//             stateSpace_->interpolate(s1, s2, (double)mid / (double)nd, test);
+
+//             if (!si_->isValid(test))
+//             {
+//                 result = false;
+
+//                 // -------- HIGH/SKIP CHOMP RULES --------
+
+//                 // Params (make these class members later if you want)
+//                 const int D_high = 4;       // try 4, then sweep 3..6 in experiments
+//                 const double t_end = 0.2;   // endpoint band
+
+//                 double t = (double)mid / (double)nd;
+//                 bool near_end = (t < t_end) || (t > 1.0 - t_end);
+
+//                 int neighbor_invalid = 0;
+//                 if (mid - 1 >= 1)
+//                     neighbor_invalid += !isValidAtIndex(mid - 1);
+//                 if (mid + 1 <= nd - 1)
+//                     neighbor_invalid += !isValidAtIndex(mid + 1);
+
+//                 bool deepFailure = (x.depth >= D_high);
+//                 bool localized = (neighbor_invalid == 0);
+
+//                 if (deepFailure && !near_end && localized)
+//                     prio = ChompPriority::HIGH;
+//                 else
+//                     prio = ChompPriority::SKIP;
+
+//                 break;
+//             }
+
+//             // refine both halves
+//             if (x.first <= mid - 1)
+//                 pos.push({x.first, mid - 1, x.depth + 1});
+//             if (mid + 1 <= x.second)
+//                 pos.push({mid + 1, x.second, x.depth + 1});
+//         }
+
+//         si_->freeState(test);
+//     }
+
+//     if (result) valid_++; else invalid_++;
+//     return result;
+// }

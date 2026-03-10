@@ -325,28 +325,27 @@ namespace ompl
         {   
             clearChompVertices();
             clearChompVertexPairs();
-
             if (!ChompOptimizeFn_)
             {
-                chomp_cost = costHelpPtr_->trueEdgeCost(edge);   //TODO: start and goal vector
                 return false;
             }
+            // if(chomp_cost.value() > 1.5)      //TODO: make this a parameter
+            // {
+            //     return false;
+            // }
 
+            this->chomp_counter_ ++;
             std::vector<std::vector<double>> waypoints = ChompOptimizeFn_(edge.first->state(), edge.second->state());
 
             // TODO: add a check if start and goal match with the input
 
             if (waypoints.size() <= 2)
             {
-                chomp_cost = costHelpPtr_->trueEdgeCost(edge);
                 return false;
             }
-            
-            // if(costHelpPtr_->trueEdgeCost(edge).value() > 2.0)  //TODO: make this a parameter
-            // {
-            //     chomp_cost = costHelpPtr_->trueEdgeCost(edge);
-            //     return false;
-            // }
+
+            std::cout << "Num Batches_ when chomp is requested: " << numBatches_ << std::endl;
+            std::cout << "edge_cost.value() when chomp is requested: " << chomp_cost.value() << std::endl;
 
             chomp_cost = costHelpPtr_->identityCost();
 
@@ -358,7 +357,7 @@ namespace ompl
 
             for (size_t i = 1; i < waypoints.size() - 1; i++)
             {
-                std::cout << "waypoint[" << i << "] =  [";
+                std::cout << "waypoint[" << i << "]  =  [";
                 for (double pt: waypoints[i])
                     std::cout << pt << ", \t'";
                 
@@ -390,51 +389,57 @@ namespace ompl
             std::cout << "number of waypoint : " << waypoints.size() << std::endl;
             std::cout << "chomp_vertex_vector_ size : " << chomp_vertex_vector_.size() << std::endl;
             std::cout << "chomp_vertex_pair_vector_.size() = " << chomp_vertex_pair_vector_.size() << "\n";
-            std::vector<double> out;
-            std::cout << "Resizing out to dimension  " << Planner::si_->getStateSpace()->getDimension() << std::endl;
-            out.resize(Planner::si_->getStateSpace()->getDimension());
-            Planner::si_->getStateSpace()->copyToReals(out, chomp_vertex_vector_[1]->state());
-            std::cout << "a random state =  [";
-            for (double ou: out)
-                std::cout << ou << ",\t";
+            // std::vector<double> out;
+            // std::cout << "Resizing out to dimension  " << Planner::si_->getStateSpace()->getDimension() << std::endl;
+            // out.resize(Planner::si_->getStateSpace()->getDimension());
+            // Planner::si_->getStateSpace()->copyToReals(out, chomp_vertex_vector_[1]->state());
+            // std::cout << "a random state =  [";
+            // for (double ou: out)
+            //     std::cout << ou << ",\t";
             
-            std::cout << "]" << std::endl;
+            // std::cout << "]" << std::endl;
             return true;
         }
 
         void BITstar::addChompEdgesToGraph()
-        {   
-            for(size_t i = 0; i < chomp_vertex_pair_vector_.size(); i++)
+        {
+            // std::cout << "[BIT* queue trace] BITstar::addChompEdgesToGraph processing-edge ("
+            //           << chomp_vertex_pair_vector_[i].first->getId() << "->"
+            //           << chomp_vertex_pair_vector_[i].second->getId() << ")" << std::endl;
+            for (size_t i = 0; i < chomp_vertex_pair_vector_.size(); i++)
             {
-                // std::cout << "[BIT* queue trace] BITstar::addChompEdgesToGraph processing-edge ("
-                //           << chomp_vertex_pair_vector_[i].first->getId() << "->"
-                //           << chomp_vertex_pair_vector_[i].second->getId() << ")" << std::endl;
-                ompl::base::Cost edge_cost = costHelpPtr_->edgeCostHeuristic(chomp_vertex_pair_vector_[i]);
-                
-                // If the child already has a parent, this is a rewiring.
+                const bool is_last = (i == chomp_vertex_pair_vector_.size() - 1);
+                ompl::base::Cost edge_cost = costHelpPtr_->trueEdgeCost(chomp_vertex_pair_vector_[i]);
+
                 if (chomp_vertex_pair_vector_[i].second->hasParent())
                 {
-                    // Replace the old parent.
+                    // Rewiring: swap parent, downstream costs propagate automatically.
                     this->replaceParent(chomp_vertex_pair_vector_[i], edge_cost);
-                }  // If not, we add the vertex without replaceing a parent.
+                    // No registerAsVertex — vertex is already counted in numVertices_.
+                }
                 else
                 {
-                    // Add a parent to the child.
+                    // New vertex: stitch into the tree.
                     chomp_vertex_pair_vector_[i].second->addParent(chomp_vertex_pair_vector_[i].first, edge_cost);
-                    
-                    // Add a child to the parent.
                     chomp_vertex_pair_vector_[i].first->addChild(chomp_vertex_pair_vector_[i].second);
-                    
-                    // Add the vertex to the graph except last beacuse that one already exists
-                    if (i!=chomp_vertex_pair_vector_.size()-1)
+
+                    if (!is_last)
                     {
-                        graphPtr_->addToSamples(chomp_vertex_pair_vector_[i].second);
+                        // Intermediate vertex: insert into NN so future batches can
+                        // see it, but do NOT push into newSamples_.
+                        graphPtr_->addToNNOnly(chomp_vertex_pair_vector_[i].second);
                         graphPtr_->incrementNumStates();
                         this->chomp_num_vertices_added_++;
-                        // std::cout << "[BIT* queue trace] BITstar::addChompEdgesToGraph added-sample vertex="
-                        //           << chomp_vertex_pair_vector_[i].second->getId() << std::endl;
                     }
+
                     graphPtr_->registerAsVertex(chomp_vertex_pair_vector_[i].second);
+                }
+
+                // Stamp intermediate vertices as already expanded so the queue
+                // will not insert their outgoing edges in the current batch.
+                if (!is_last)
+                {
+                    chomp_vertex_pair_vector_[i].second->registerExpansion();
                 }
             }
         }
@@ -712,6 +717,10 @@ namespace ompl
                 VertexPtrPair edge = queuePtr_->popFrontEdge();
 
                 // If this edge is already part of the search tree it's a freebie.
+                // does the child already have a parent, and is that parent exactly the vertex we're proposing as its parent?
+                // If true, this edge is not a candidate — it is an edge already confirmed and accepted into the search tree 
+                // from a previous iteration or previous batch. The comment calls it a "freebie" because no collision check 
+                // or cost evaluation is needed. The work was already done.
                 if (edge.second->hasParent() && edge.second->getParent()->getId() == edge.first->getId())
                 {
                     if (!edge.first->isExpandedOnCurrentSearch())
@@ -752,15 +761,15 @@ namespace ompl
                             // Does this edge have a collision? 
                             bool is_collision_free = true;
                             
+                            // bool is_chomp_suggested;
+                            // is_collision_free = this->checkEdge(edge, is_chomp_suggested);
+                            
                             is_collision_free = this->checkEdge(edge);
                             
                             // CHOMP STUFF
                             bool is_chomp = false;
-                            if(!is_collision_free && numBatches_ > 1 )  // && edge_cost.value() < 1.0 )
+                            if(!is_collision_free && edge_cost.value() < 2.0)  // && edge_cost.value() < 1.0 )
                             {
-                                std::cout << "Num Batches_ when chomp is called: " << numBatches_ << std::endl;
-                                std::cout << "edge_cost.value() when chomp is called: " << edge_cost.value() << std::endl;
-                                this->chomp_counter_ ++;
                                 is_chomp = this->ChompOptimize(edge, edge_cost);
                                 if(is_chomp)
                                 {
@@ -1024,6 +1033,7 @@ namespace ompl
             {
                 ++numEdgeCollisionChecks_;
                 return Planner::si_->checkMotion(edge.first->state(), edge.second->state());
+                // return Planner::si_->checkMotion(edge.first->state(), edge.second->state(), is_chomp_suggested);
             }
         }
 
@@ -1356,6 +1366,7 @@ namespace ompl
             if (this->solved_atleast_once_)
             {
                 outputStream << ", {";
+                this->solved_atleast_once_ = true;
             }
             else
             {
@@ -1388,6 +1399,15 @@ namespace ompl
                outputStream << ", \"chomp_success_counter\" : " << this->chomp_success_counter_;
                outputStream << ", \"chomp_num_edges_used\" : " << this->chomp_num_edges_used_;
                outputStream << ", \"chomp_num_vertices_added\" : " << this->chomp_num_vertices_added_;
+            }
+            outputStream << ", \"trajectory\" : ";
+            if(this->solved_atleast_once_)
+            {
+                outputStream << this->getSolutionPathJsonFormat();
+            }
+            else
+            {
+                outputStream << "[]";
             }
 
             outputStream << "}\n";

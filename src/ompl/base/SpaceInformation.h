@@ -354,6 +354,13 @@ namespace ompl
                 return motionValidator_->checkMotion(s1, s2);
             }
 
+            // /** \brief Check if the path between two states (from \e s1 to \e s2) is valid, using the MotionValidator.
+            //  * This function assumes \e s1 is valid. */
+            // virtual bool checkMotion(const State *s1, const State *s2, bool& is_chomp_suggested) const
+            // {
+            //     return motionValidator_->checkMotion(s1, s2, is_chomp_suggested);
+            // }
+
             /** \brief Incrementally check if a sequence of states is valid. Given a vector of states, this routine only
                 checks the first \e count elements and marks the index of the first invalid state
                 \param states the array of states to be checked
