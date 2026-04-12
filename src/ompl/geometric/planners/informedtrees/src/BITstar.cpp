@@ -321,6 +321,109 @@ namespace ompl
             this->rabit_star_ = true;
         }
 
+        void BITstar::setChompFullPathFn(const ChompFullPathFn &fn)
+        {
+            ChompFullPathFn_ = fn;
+            std::cout << "BITstar::setChompFullPathFn : full-path CHOMP callback loaded" << std::endl;
+        }
+
+        void BITstar::attemptFullPathChomp()
+        {
+            if (attemptingFullPathChomp_ || !ChompFullPathFn_ || !hasExactSolution_)
+                return;
+
+            // Only trigger if bestCost_ is at least 10% cheaper than the seed we last gave CHOMP.
+            // This prevents wasting ~2 s of CHOMP time on tiny incremental BITstar refinements.
+            const double prev  = lastChompSeedCost_.value();
+            const double cur   = bestCost_.value();
+            const bool   first = std::isinf(prev);          // first call: prev == infinity
+            if (!first && (prev - cur) / prev < 0.10)
+                return;
+
+            attemptingFullPathChomp_ = true;
+            lastChompSeedCost_ = bestCost_;
+
+            // --- Collect the current best path in start→goal order ---
+            const size_t dim = Planner::si_->getStateSpace()->getDimension();
+            std::vector<const ompl::base::State *> reversePath = this->bestPathFromGoalToStart();
+            // reversePath[0] = goal, reversePath.back() = root (start)
+
+            std::vector<std::vector<double>> seed_waypoints;
+            seed_waypoints.reserve(reversePath.size());
+            for (int idx = static_cast<int>(reversePath.size()) - 1; idx >= 0; --idx)
+            {
+                std::vector<double> wp(dim);
+                Planner::si_->getStateSpace()->copyToReals(wp, reversePath[idx]);
+                seed_waypoints.push_back(std::move(wp));
+            }
+
+            std::cout << "[CHOMP full-path] Calling CHOMP on full path (" << seed_waypoints.size()
+                      << " waypoints, seed cost=" << cur << ")" << std::endl;
+
+            // --- Invoke the Python callback ---
+            std::vector<std::vector<double>> result = ChompFullPathFn_(
+                reversePath.back(),   // start state (root of tree)
+                reversePath.front(),  // goal state
+                seed_waypoints);
+
+            if (result.size() <= 2)
+            {
+                std::cout << "[CHOMP full-path] FAILED (result has " << result.size() << " waypoints)" << std::endl;
+                attemptingFullPathChomp_ = false;
+                return;
+            }
+
+            // --- Build a vertex chain from the CHOMP result ---
+            clearChompVertices();
+            clearChompVertexPairs();
+
+            // Re-use the existing start and goal vertices from the tree.
+            VertexConstPtr rootConst = curGoalVertex_;
+            while (!rootConst->isRoot())
+                rootConst = rootConst->getParent();
+            VertexPtr startV = std::const_pointer_cast<Vertex>(rootConst);
+            VertexPtr goalV  = std::const_pointer_cast<Vertex>(curGoalVertex_);
+
+            chomp_vertex_vector_.push_back(startV);
+            for (size_t i = 1; i + 1 < result.size(); ++i)
+            {
+                auto v = std::make_shared<Vertex>(Planner::si_, costHelpPtr_.get(), queuePtr_.get(),
+                                                  graphPtr_->getApproximationIdPtr(), false);
+                Planner::si_->getStateSpace()->copyFromReals(v->state(), result[i]);
+                chomp_vertex_vector_.push_back(v);
+            }
+            chomp_vertex_vector_.push_back(goalV);
+
+            ompl::base::Cost chompCost = costHelpPtr_->identityCost();
+            for (size_t i = 0; i + 1 < chomp_vertex_vector_.size(); ++i)
+            {
+                VertexPtrPair edge(chomp_vertex_vector_[i], chomp_vertex_vector_[i + 1]);
+                this->whitelistEdge(edge);
+                chompCost = costHelpPtr_->combineCosts(chompCost, costHelpPtr_->edgeCostHeuristic(edge));
+                chomp_vertex_pair_vector_.push_back(edge);
+            }
+
+            // --- Accept only if it improves bestCost_ ---
+            if (costHelpPtr_->isCostBetterThan(chompCost, bestCost_))
+            {
+                std::cout << "[CHOMP full-path] SUCCESS: " << bestCost_.value()
+                          << " → " << chompCost.value()
+                          << " (" << (bestCost_.value() - chompCost.value()) / bestCost_.value() * 100.0 << "% improvement)"
+                          << std::endl;
+                this->chomp_success_counter_++;
+                this->chomp_num_edges_used_ += chomp_vertex_pair_vector_.size();
+                this->addChompEdgesToGraph();
+                this->updateGoalVertex();   // re-entry blocked by attemptingFullPathChomp_
+            }
+            else
+            {
+                std::cout << "[CHOMP full-path] No improvement: CHOMP=" << chompCost.value()
+                          << " vs BITstar=" << bestCost_.value() << std::endl;
+            }
+
+            attemptingFullPathChomp_ = false;
+        }
+
         bool BITstar::ChompOptimize(VertexPtrPair edge, ompl::base::Cost &chomp_cost)
         {   
             clearChompVertices();
@@ -768,7 +871,7 @@ namespace ompl
                             
                             // CHOMP STUFF
                             bool is_chomp = false;
-                            if(!is_collision_free && edge_cost.value() < 2.0)  // && edge_cost.value() < 1.0 )
+                            if(!is_collision_free)  // && edge_cost.value() < 2.0 )
                             {
                                 is_chomp = this->ChompOptimize(edge, edge_cost);
                                 if(is_chomp)
@@ -1212,6 +1315,14 @@ namespace ompl
                     // Similarly, it appears to be ordered as (goal, goal-1, goal-2,...start+1, start) which
                     // conveniently allows us to reuse code.
                     Planner::pdef_->getIntermediateSolutionCallback()(this, this->bestPathFromGoalToStart(), bestCost_);
+                }
+
+                // Full-path CHOMP post-processing: run CHOMP on the entire solution using the
+                // BITstar path as a seed trajectory. If successful, injects the shorter path
+                // back into the graph and shrinks the informed sampling ellipse.
+                if (this->rabit_star_)
+                {
+                    this->attemptFullPathChomp();
                 }
             }
             // No else, the goal didn't change

@@ -38,6 +38,7 @@
 #define OMPL_GEOMETRIC_PLANNERS_INFORMEDTREES_BITSTAR_
 
 #include <functional>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -155,9 +156,17 @@ namespace ompl
             /** \brief A utility functor for ImplicitGraph and SearchQueue. */
             using NameFunc = std::function<std::string()>;
 
-            /** \brief A callback that returns a state sequence from start to goal. */
+            /** \brief A callback that returns a state sequence from start to goal (per-edge CHOMP). */
             using ChompOptimizeFn =
                 std::function<std::vector<std::vector<double>>(const base::State *start, const base::State *goal)>;
+
+            /** \brief A callback for full-path CHOMP post-processing.
+             *  Receives start, goal, and the current best path as a seed trajectory.
+             *  Returns the CHOMP-optimised waypoints, or an empty/2-point vector on failure. */
+            using ChompFullPathFn =
+                std::function<std::vector<std::vector<double>>(const base::State *start,
+                                                               const base::State *goal,
+                                                               const std::vector<std::vector<double>> &seed_waypoints)>;
 
             /** \brief Construct with a pointer to the space information and an optional name. */
             BITstar(const base::SpaceInformationPtr &spaceInfo, const std::string &name = "kBITstar");
@@ -181,8 +190,12 @@ namespace ompl
             // Chomp state sequence.
             // ---
 
-            /** \brief Set a callback to build a state sequence from a start and goal state. */
+            /** \brief Set a callback to build a state sequence from a start and goal state (per-edge CHOMP). */
             void setChompOptimizeFn(const ChompOptimizeFn &fn);
+
+            /** \brief Set the full-path CHOMP callback used for post-processing whenever a new solution is found.
+             *  The callback receives the full BITstar path as a seed trajectory, enabling 50%+ cost reductions. */
+            void setChompFullPathFn(const ChompFullPathFn &fn);
             
 
             // ---
@@ -595,8 +608,25 @@ namespace ompl
             /** \brief Whether to stop the planner as soon as the path changes. */
             bool stopOnSolutionChange_{false};
 
-            /** \brief A callback that returns a state sequence from start to goal. */
+            /** \brief Per-edge CHOMP callback (called inside iterate()). */
             ChompOptimizeFn ChompOptimizeFn_;
+
+            /** \brief Full-path CHOMP post-processing callback (called after each new solution). */
+            ChompFullPathFn ChompFullPathFn_;
+
+            /** \brief Re-entry guard — prevents attemptFullPathChomp() from being called recursively
+             *  when it triggers updateGoalVertex() internally. */
+            bool attemptingFullPathChomp_{false};
+
+            /** \brief Cost of the BITstar solution at the time CHOMP last ran full-path optimisation.
+             *  Used to avoid re-running CHOMP on tiny incremental improvements (< 10% threshold). */
+            ompl::base::Cost lastChompSeedCost_{ompl::base::Cost(std::numeric_limits<double>::infinity())};
+
+            /** \brief After a new solution is found, run CHOMP on the entire path using the
+             *  BITstar solution as a seed trajectory (warm-start). If CHOMP returns a shorter
+             *  path, inject the result into the graph and call updateGoalVertex() to shrink the
+             *  informed ellipse for subsequent BITstar sampling. */
+            void attemptFullPathChomp();
 
             /** \brief Stored vertices built from the chomp sequence. */
             VertexPtrVector chomp_vertex_vector_;

@@ -766,6 +766,11 @@ class ompl_geometric_generator_t(code_generator_t):
             'ChompOptimizeFn',
             'CHOMP optimize function'
         )
+        self.add_function_wrapper(
+            'std::vector<std::vector<double> >(const ompl::base::State*, const ompl::base::State*, const std::vector<std::vector<double> >&)',
+            'ChompFullPathFn',
+            'CHOMP full-path optimize function'
+        )
         # code generation fails to compile, most likely because of a bug in
         # Py++'s generation of exposed_decl.pypp.txt.
         self.ompl_ns.member_functions('getPlannerAllocator').exclude()
