@@ -325,6 +325,7 @@ namespace ompl
         {
             ChompFullPathFn_ = fn;
             std::cout << "BITstar::setChompFullPathFn : full-path CHOMP callback loaded" << std::endl;
+            this->rabit_star_ = true;
         }
 
         void BITstar::attemptFullPathChomp()
@@ -359,6 +360,8 @@ namespace ompl
 
             std::cout << "[CHOMP full-path] Calling CHOMP on full path (" << seed_waypoints.size()
                       << " waypoints, seed cost=" << cur << ")" << std::endl;
+
+            this->chomp_counter_ ++;
 
             // --- Invoke the Python callback ---
             std::vector<std::vector<double>> result = ChompFullPathFn_(
